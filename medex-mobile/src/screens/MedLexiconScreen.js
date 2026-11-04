@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { 
   View, 
   Text, 
@@ -12,43 +12,75 @@ import { colors, spacing, borderRadius } from '../theme/colors';
 import { Header } from '../components/Header';
 import { TermCard } from '../components/TermCard';
 import { Badge } from '../components/Badge';
-import { MEDICAL_TERMS, BODY_PARTS, MEDICINES_DATABASE } from '../data/mockData';
+import { fetchBodyParts, fetchMedicines, fetchTerms } from '../services/medicineService';
 import { Ionicons } from '@expo/vector-icons';
+
+// Case-insensitive A→Z (or Z→A when desc) by the given name field
+const sortByName = (list, key, desc) =>
+  [...list].sort((a, b) =>
+    (desc ? -1 : 1) * a[key].localeCompare(b[key], 'en', { sensitivity: 'base' })
+  );
 
 export const MedLexiconScreen = () => {
   const [activeTab, setActiveTab] = useState('terms'); // 'terms', 'body', 'meds'
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('ALL');
+  const [selectedCategories, setSelectedCategories] = useState([]); // applied filter; empty = all
+  const [draftCategories, setDraftCategories] = useState([]); // selections inside the sheet
   const [selectedMedicine, setSelectedMedicine] = useState(null);
+  const [categorySheetOpen, setCategorySheetOpen] = useState(false);
+  const [sortDesc, setSortDesc] = useState(false);
+  const [medicines, setMedicines] = useState([]);
+  const [terms, setTerms] = useState([]);
+  const [bodyParts, setBodyParts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
-  const categories = ['ALL', 'Cardiovascular', 'Hematology', 'Endocrinology', 'Cardiology', 'Pathology'];
+  useEffect(() => {
+    let active = true;
+    Promise.all([fetchMedicines(), fetchTerms(), fetchBodyParts()])
+      .then(([meds, termRows, bodyRows]) => {
+        if (!active) return;
+        setMedicines(meds);
+        setTerms(termRows);
+        setBodyParts(bodyRows);
+      })
+      .catch(e => { if (active) setLoadError(e.message); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  // Category chips come from the categories joined onto the fetched terms
+  const categories = useMemo(
+    () => [...new Set(terms.map(t => t.category).filter(Boolean))],
+    [terms]
+  );
 
   // Filter terms
-  const filteredTerms = MEDICAL_TERMS.filter(item => {
+  const filteredTerms = sortByName(terms.filter(item => {
     const matchesSearch = 
       item.english_term.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.tamil_term.includes(searchQuery) ||
       (item.tamil_transliteration && item.tamil_transliteration.toLowerCase().includes(searchQuery.toLowerCase())) ||
       item.simple_english.toLowerCase().includes(searchQuery.toLowerCase());
     
-    const matchesCat = selectedCategory === 'ALL' || item.category === selectedCategory;
+    const matchesCat = selectedCategories.length === 0 || selectedCategories.includes(item.category);
     return matchesSearch && matchesCat;
-  });
+  }), 'english_term', sortDesc);
 
   // Filter body parts
-  const filteredBodyParts = BODY_PARTS.filter(bp => 
+  const filteredBodyParts = sortByName(bodyParts.filter(bp =>
     bp.name_en.toLowerCase().includes(searchQuery.toLowerCase()) ||
     bp.name_ta.includes(searchQuery) ||
-    bp.body_system.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+    (bp.body_system && bp.body_system.toLowerCase().includes(searchQuery.toLowerCase()))
+  ), 'name_en', sortDesc);
 
   // Filter medicines
-  const filteredMedicines = MEDICINES_DATABASE.filter(med =>
+  const filteredMedicines = sortByName(medicines.filter(med =>
     med.generic_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    med.name_ta.includes(searchQuery) ||
+    (med.name_ta && med.name_ta.includes(searchQuery)) ||
     (med.brand_names && med.brand_names.some(b => b.toLowerCase().includes(searchQuery.toLowerCase()))) ||
     med.uses_en.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  ), 'generic_name', sortDesc);
 
   return (
     <View style={styles.container}>
@@ -113,25 +145,49 @@ export const MedLexiconScreen = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Category Pills for Terms */}
+        {/* Compact category filter for Terms, opens a sheet */}
+        <View style={styles.controlRow}>
         {activeTab === 'terms' && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.catScroll}>
-            {categories.map(cat => (
-              <TouchableOpacity
-                key={cat}
-                style={[styles.catChip, selectedCategory === cat && styles.catChipActive]}
-                onPress={() => setSelectedCategory(cat)}
-              >
-                <Text style={[styles.catChipText, selectedCategory === cat && styles.catChipTextActive]}>
-                  {cat}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+          <TouchableOpacity
+            style={[styles.filterBar, styles.filterFlex]}
+            activeOpacity={0.8}
+            onPress={() => {
+              setDraftCategories(selectedCategories);
+              setCategorySheetOpen(true);
+            }}
+          >
+            <Ionicons name="funnel-outline" size={14} color={colors.primary} />
+            <Text style={styles.filterBarText}>
+              Category: {selectedCategories.length === 0
+                ? 'All'
+                : selectedCategories.length === 1
+                  ? selectedCategories[0]
+                  : `${selectedCategories.length} selected`}
+            </Text>
+            <Ionicons name="chevron-down" size={14} color={colors.textSecondary} />
+          </TouchableOpacity>
         )}
+
+        <TouchableOpacity style={styles.sortBtn} activeOpacity={0.8} onPress={() => setSortDesc(d => !d)}>
+          <Ionicons name="swap-vertical" size={14} color={colors.primary} />
+          <Text style={styles.sortBtnText}>{sortDesc ? 'Z → A' : 'A → Z'}</Text>
+        </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+        {loading ? (
+          <View style={styles.emptyBox}>
+            <Text style={styles.emptySub}>Loading from database...</Text>
+          </View>
+        ) : loadError ? (
+          <View style={styles.emptyBox}>
+            <Ionicons name="cloud-offline-outline" size={36} color={colors.textMuted} />
+            <Text style={styles.emptyTitle}>Could not load data</Text>
+            <Text style={styles.emptySub}>{loadError}</Text>
+          </View>
+        ) : (
+          <>
         {/* Terms Tab */}
         {activeTab === 'terms' && (
           <View>
@@ -162,7 +218,9 @@ export const MedLexiconScreen = () => {
                     <Text style={styles.bodyNameEn}>{bp.name_en}</Text>
                     <Text style={styles.bodyNameTa}>{bp.name_ta}</Text>
                   </View>
-                  <Badge label={bp.body_system} type="primary" size="sm" />
+                  {bp.body_system ? (
+                    <Badge label={bp.body_system} type="primary" size="sm" />
+                  ) : null}
                 </View>
                 <Text style={styles.bodyDescEn}>{bp.description_en}</Text>
                 <View style={styles.bodyTaBox}>
@@ -210,7 +268,56 @@ export const MedLexiconScreen = () => {
             ))}
           </View>
         )}
+          </>
+        )}
       </ScrollView>
+
+      {/* Category Sheet */}
+      <Modal visible={categorySheetOpen} transparent animationType="slide" onRequestClose={() => setCategorySheetOpen(false)}>
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setCategorySheetOpen(false)} />
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalMedTitle}>Filter by category</Text>
+              <TouchableOpacity onPress={() => setCategorySheetOpen(false)}>
+                <Ionicons name="close-circle" size={26} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.sheetOptions}>
+              {categories.map(cat => {
+                const active = draftCategories.includes(cat);
+                return (
+                  <TouchableOpacity
+                    key={cat}
+                    style={[styles.catChip, active && styles.catChipActive]}
+                    onPress={() => setDraftCategories(prev =>
+                      prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
+                    )}
+                  >
+                    <Text style={[styles.catChipText, active && styles.catChipTextActive]}>
+                      {cat}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <View style={styles.sheetFooter}>
+              <TouchableOpacity style={styles.clearBtn} onPress={() => setDraftCategories([])}>
+                <Text style={styles.clearBtnText}>Clear</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.applyBtn}
+                onPress={() => {
+                  setSelectedCategories(draftCategories);
+                  setCategorySheetOpen(false);
+                }}
+              >
+                <Text style={styles.applyBtnText}>Apply filter</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Medicine Details Modal */}
       {selectedMedicine && (
@@ -330,16 +437,94 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: '700'
   },
-  catScroll: {
+  filterBar: {
     flexDirection: 'row',
-    marginTop: 4
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 7,
+    paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#1E293B'
+  },
+  controlRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm
+  },
+  filterFlex: {
+    flex: 1
+  },
+  sortBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 7,
+    paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#1E293B'
+  },
+  sortBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    marginLeft: 6
+  },
+  filterBarText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    marginHorizontal: 6
+  },
+  sheetOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingBottom: spacing.md
+  },
+  sheetFooter: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border
+  },
+  clearBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.border
+  },
+  clearBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textSecondary
+  },
+  applyBtn: {
+    flex: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.primary
+  },
+  applyBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textWhite
   },
   catChip: {
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 6,
     borderRadius: borderRadius.full,
-    backgroundColor: '#1E293B',
-    marginRight: 6
+    backgroundColor: '#1E293B'
   },
   catChipActive: {
     backgroundColor: colors.primary
