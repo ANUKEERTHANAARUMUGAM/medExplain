@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { 
   View, 
   Text, 
@@ -12,7 +12,7 @@ import { colors, spacing, borderRadius } from '../theme/colors';
 import { Header } from '../components/Header';
 import { TermCard } from '../components/TermCard';
 import { Badge } from '../components/Badge';
-import { MEDICAL_TERMS, BODY_PARTS, MEDICINES_DATABASE } from '../data/mockData';
+import { fetchBodyParts, fetchMedicines, fetchTerms } from '../services/medicineService';
 import { Ionicons } from '@expo/vector-icons';
 
 export const MedLexiconScreen = () => {
@@ -20,11 +20,34 @@ export const MedLexiconScreen = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
   const [selectedMedicine, setSelectedMedicine] = useState(null);
+  const [medicines, setMedicines] = useState([]);
+  const [terms, setTerms] = useState([]);
+  const [bodyParts, setBodyParts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
-  const categories = ['ALL', 'Cardiovascular', 'Hematology', 'Endocrinology', 'Cardiology', 'Pathology'];
+  useEffect(() => {
+    let active = true;
+    Promise.all([fetchMedicines(), fetchTerms(), fetchBodyParts()])
+      .then(([meds, termRows, bodyRows]) => {
+        if (!active) return;
+        setMedicines(meds);
+        setTerms(termRows);
+        setBodyParts(bodyRows);
+      })
+      .catch(e => { if (active) setLoadError(e.message); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  // Category chips come from the categories joined onto the fetched terms
+  const categories = useMemo(
+    () => ['ALL', ...new Set(terms.map(t => t.category).filter(Boolean))],
+    [terms]
+  );
 
   // Filter terms
-  const filteredTerms = MEDICAL_TERMS.filter(item => {
+  const filteredTerms = terms.filter(item => {
     const matchesSearch = 
       item.english_term.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.tamil_term.includes(searchQuery) ||
@@ -36,16 +59,16 @@ export const MedLexiconScreen = () => {
   });
 
   // Filter body parts
-  const filteredBodyParts = BODY_PARTS.filter(bp => 
+  const filteredBodyParts = bodyParts.filter(bp =>
     bp.name_en.toLowerCase().includes(searchQuery.toLowerCase()) ||
     bp.name_ta.includes(searchQuery) ||
-    bp.body_system.toLowerCase().includes(searchQuery.toLowerCase())
+    (bp.body_system && bp.body_system.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   // Filter medicines
-  const filteredMedicines = MEDICINES_DATABASE.filter(med =>
+  const filteredMedicines = medicines.filter(med =>
     med.generic_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    med.name_ta.includes(searchQuery) ||
+    (med.name_ta && med.name_ta.includes(searchQuery)) ||
     (med.brand_names && med.brand_names.some(b => b.toLowerCase().includes(searchQuery.toLowerCase()))) ||
     med.uses_en.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -132,6 +155,18 @@ export const MedLexiconScreen = () => {
       </View>
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+        {loading ? (
+          <View style={styles.emptyBox}>
+            <Text style={styles.emptySub}>Loading from database...</Text>
+          </View>
+        ) : loadError ? (
+          <View style={styles.emptyBox}>
+            <Ionicons name="cloud-offline-outline" size={36} color={colors.textMuted} />
+            <Text style={styles.emptyTitle}>Could not load data</Text>
+            <Text style={styles.emptySub}>{loadError}</Text>
+          </View>
+        ) : (
+          <>
         {/* Terms Tab */}
         {activeTab === 'terms' && (
           <View>
@@ -162,7 +197,9 @@ export const MedLexiconScreen = () => {
                     <Text style={styles.bodyNameEn}>{bp.name_en}</Text>
                     <Text style={styles.bodyNameTa}>{bp.name_ta}</Text>
                   </View>
-                  <Badge label={bp.body_system} type="primary" size="sm" />
+                  {bp.body_system ? (
+                    <Badge label={bp.body_system} type="primary" size="sm" />
+                  ) : null}
                 </View>
                 <Text style={styles.bodyDescEn}>{bp.description_en}</Text>
                 <View style={styles.bodyTaBox}>
@@ -209,6 +246,8 @@ export const MedLexiconScreen = () => {
               </TouchableOpacity>
             ))}
           </View>
+        )}
+          </>
         )}
       </ScrollView>
 
