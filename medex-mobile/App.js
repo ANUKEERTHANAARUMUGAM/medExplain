@@ -13,12 +13,13 @@ import { MedExplainScreen } from './src/screens/MedExplainScreen';
 import { MedRemindScreen } from './src/screens/MedRemindScreen';
 import { MedLexiconScreen } from './src/screens/MedLexiconScreen';
 import { HospitalsScreen } from './src/screens/HospitalsScreen';
+import { InsuranceScreen } from './src/screens/InsuranceScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('explain'); // 'explain', 'remind', 'lexicon', 'hospitals', 'settings'
+  const [activeTab, setActiveTab] = useState('explain'); // 'explain', 'remind', 'lexicon', 'hospitals', 'insurance', 'settings'
 
   const renderScreen = () => {
     switch (activeTab) {
@@ -30,6 +31,8 @@ export default function App() {
         return <MedLexiconScreen />;
       case 'hospitals':
         return <HospitalsScreen />;
+      case 'insurance':
+        return <InsuranceScreen />;
       case 'settings':
         return <SettingsScreen />;
       default:
@@ -56,7 +59,7 @@ export default function App() {
           <View style={[styles.navIconBox, activeTab === 'explain' && styles.navIconBoxActive]}>
             <Ionicons 
               name={activeTab === 'explain' ? "document-text" : "document-text-outline"} 
-              size={22} 
+              size={20} 
               color={activeTab === 'explain' ? colors.textWhite : colors.textMuted} 
             />
           </View>
@@ -73,7 +76,7 @@ export default function App() {
           <View style={[styles.navIconBox, activeTab === 'remind' && styles.navIconBoxActive]}>
             <Ionicons 
               name={activeTab === 'remind' ? "alarm" : "alarm-outline"} 
-              size={22} 
+              size={20} 
               color={activeTab === 'remind' ? colors.textWhite : colors.textMuted} 
             />
           </View>
@@ -90,7 +93,7 @@ export default function App() {
           <View style={[styles.navIconBox, activeTab === 'lexicon' && styles.navIconBoxActive]}>
             <Ionicons 
               name={activeTab === 'lexicon' ? "book" : "book-outline"} 
-              size={22} 
+              size={20} 
               color={activeTab === 'lexicon' ? colors.textWhite : colors.textMuted} 
             />
           </View>
@@ -107,12 +110,29 @@ export default function App() {
           <View style={[styles.navIconBox, activeTab === 'hospitals' && styles.navIconBoxActive]}>
             <Ionicons 
               name={activeTab === 'hospitals' ? "business" : "business-outline"} 
-              size={22} 
+              size={20} 
               color={activeTab === 'hospitals' ? colors.textWhite : colors.textMuted} 
             />
           </View>
           <Text style={[styles.navLabel, activeTab === 'hospitals' && styles.navLabelActive]}>
             Hospitals
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={styles.navItem} 
+          onPress={() => setActiveTab('insurance')}
+          activeOpacity={0.8}
+        >
+          <View style={[styles.navIconBox, activeTab === 'insurance' && styles.navIconBoxActive]}>
+            <Ionicons 
+              name={activeTab === 'insurance' ? "shield-checkmark" : "shield-checkmark-outline"} 
+              size={20} 
+              color={activeTab === 'insurance' ? colors.textWhite : colors.textMuted} 
+            />
+          </View>
+          <Text style={[styles.navLabel, activeTab === 'insurance' && styles.navLabelActive]}>
+            Insurance
           </Text>
         </TouchableOpacity>
 
@@ -124,7 +144,7 @@ export default function App() {
           <View style={[styles.navIconBox, activeTab === 'settings' && styles.navIconBoxActive]}>
             <Ionicons 
               name={activeTab === 'settings' ? "settings" : "settings-outline"} 
-              size={22} 
+              size={20} 
               color={activeTab === 'settings' ? colors.textWhite : colors.textMuted} 
             />
           </View>
@@ -152,7 +172,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#1E293B',
     paddingVertical: 8,
-    paddingHorizontal: 6,
+    paddingHorizontal: 2,
     justifyContent: 'space-around',
     alignItems: 'center'
   },
@@ -162,8 +182,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center'
   },
   navIconBox: {
-    width: 36,
-    height: 36,
+    width: 34,
+    height: 34,
     borderRadius: borderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
@@ -173,7 +193,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary
   },
   navLabel: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '600',
     color: colors.textMuted
   },
