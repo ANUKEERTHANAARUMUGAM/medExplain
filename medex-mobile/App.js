@@ -1,184 +1,64 @@
 import React, { useState } from 'react';
-import { 
-  StyleSheet, 
-  View, 
-  Text, 
-  TouchableOpacity, 
-  SafeAreaView, 
-  StatusBar,
-  Platform
-} from 'react-native';
+import { Platform, SafeAreaView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import { colors, borderRadius } from './src/theme/colors';
+import { AmbientHealthBackground } from './src/components/AmbientHealthBackground';
+import { HomeScreen } from './src/screens/HomeScreen';
 import { MedExplainScreen } from './src/screens/MedExplainScreen';
 import { MedRemindScreen } from './src/screens/MedRemindScreen';
 import { MedLexiconScreen } from './src/screens/MedLexiconScreen';
 import { HospitalsScreen } from './src/screens/HospitalsScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
-import { Ionicons } from '@expo/vector-icons';
-import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
+
+const TABS = [
+  { id: 'home', label: 'Home', icon: 'grid-outline', active: 'grid' },
+  { id: 'explain', label: 'Reports', icon: 'document-text-outline', active: 'document-text' },
+  { id: 'remind', label: 'Medicines', icon: 'medkit-outline', active: 'medkit' },
+  { id: 'lexicon', label: 'Library', icon: 'book-outline', active: 'book' },
+  { id: 'hospitals', label: 'Care', icon: 'location-outline', active: 'location' },
+  { id: 'settings', label: 'Profile', icon: 'person-outline', active: 'person' },
+];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('explain'); // 'explain', 'remind', 'lexicon', 'hospitals', 'settings'
-
-  const renderScreen = () => {
-    switch (activeTab) {
-      case 'explain':
-        return <MedExplainScreen />;
-      case 'remind':
-        return <MedRemindScreen />;
-      case 'lexicon':
-        return <MedLexiconScreen />;
-      case 'hospitals':
-        return <HospitalsScreen />;
-      case 'settings':
-        return <SettingsScreen />;
-      default:
-        return <MedExplainScreen />;
-    }
+  const [activeTab, setActiveTab] = useState('home');
+  const screens = {
+    home: <HomeScreen onNavigate={setActiveTab} />,
+    explain: <MedExplainScreen />,
+    remind: <MedRemindScreen />,
+    lexicon: <MedLexiconScreen />,
+    hospitals: <HospitalsScreen />,
+    settings: <SettingsScreen />,
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <ExpoStatusBar style="light" backgroundColor={colors.bgDark} />
-      
-      {/* Active Screen View */}
-      <View style={styles.screenContainer}>
-        {renderScreen()}
-      </View>
-
-      {/* Modern Bottom Navigation Bar */}
-      <View style={styles.navBar}>
-        <TouchableOpacity 
-          style={styles.navItem} 
-          onPress={() => setActiveTab('explain')}
-          activeOpacity={0.8}
-        >
-          <View style={[styles.navIconBox, activeTab === 'explain' && styles.navIconBoxActive]}>
-            <Ionicons 
-              name={activeTab === 'explain' ? "document-text" : "document-text-outline"} 
-              size={22} 
-              color={activeTab === 'explain' ? colors.textWhite : colors.textMuted} 
-            />
-          </View>
-          <Text style={[styles.navLabel, activeTab === 'explain' && styles.navLabelActive]}>
-            Explain
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.navItem} 
-          onPress={() => setActiveTab('remind')}
-          activeOpacity={0.8}
-        >
-          <View style={[styles.navIconBox, activeTab === 'remind' && styles.navIconBoxActive]}>
-            <Ionicons 
-              name={activeTab === 'remind' ? "alarm" : "alarm-outline"} 
-              size={22} 
-              color={activeTab === 'remind' ? colors.textWhite : colors.textMuted} 
-            />
-          </View>
-          <Text style={[styles.navLabel, activeTab === 'remind' && styles.navLabelActive]}>
-            Remind
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.navItem} 
-          onPress={() => setActiveTab('lexicon')}
-          activeOpacity={0.8}
-        >
-          <View style={[styles.navIconBox, activeTab === 'lexicon' && styles.navIconBoxActive]}>
-            <Ionicons 
-              name={activeTab === 'lexicon' ? "book" : "book-outline"} 
-              size={22} 
-              color={activeTab === 'lexicon' ? colors.textWhite : colors.textMuted} 
-            />
-          </View>
-          <Text style={[styles.navLabel, activeTab === 'lexicon' && styles.navLabelActive]}>
-            Lexicon
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.navItem} 
-          onPress={() => setActiveTab('hospitals')}
-          activeOpacity={0.8}
-        >
-          <View style={[styles.navIconBox, activeTab === 'hospitals' && styles.navIconBoxActive]}>
-            <Ionicons 
-              name={activeTab === 'hospitals' ? "business" : "business-outline"} 
-              size={22} 
-              color={activeTab === 'hospitals' ? colors.textWhite : colors.textMuted} 
-            />
-          </View>
-          <Text style={[styles.navLabel, activeTab === 'hospitals' && styles.navLabelActive]}>
-            Hospitals
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.navItem} 
-          onPress={() => setActiveTab('settings')}
-          activeOpacity={0.8}
-        >
-          <View style={[styles.navIconBox, activeTab === 'settings' && styles.navIconBoxActive]}>
-            <Ionicons 
-              name={activeTab === 'settings' ? "settings" : "settings-outline"} 
-              size={22} 
-              color={activeTab === 'settings' ? colors.textWhite : colors.textMuted} 
-            />
-          </View>
-          <Text style={[styles.navLabel, activeTab === 'settings' && styles.navLabelActive]}>
-            Settings
-          </Text>
-        </TouchableOpacity>
+      <ExpoStatusBar style="dark" backgroundColor={colors.bgMuted} />
+      <AmbientHealthBackground />
+      <View style={styles.screenContainer}>{screens[activeTab] || screens.home}</View>
+      <View style={styles.navWrap}>
+        <View style={styles.navBar}>
+          {TABS.map(tab => {
+            const selected = activeTab === tab.id;
+            return <TouchableOpacity key={tab.id} style={styles.navItem} onPress={() => setActiveTab(tab.id)} activeOpacity={0.72} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={tab.label}>
+              <View style={[styles.navIconBox, selected && styles.navIconBoxActive]}><Ionicons name={selected ? tab.active : tab.icon} size={19} color={selected ? '#FFFFFF' : colors.textMuted} /></View>
+              <Text numberOfLines={1} style={[styles.navLabel, selected && styles.navLabelActive]}>{tab.label}</Text>
+            </TouchableOpacity>;
+          })}
+        </View>
       </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.bgDark,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0
-  },
-  screenContainer: {
-    flex: 1
-  },
-  navBar: {
-    flexDirection: 'row',
-    backgroundColor: '#0F172A',
-    borderTopWidth: 1,
-    borderTopColor: '#1E293B',
-    paddingVertical: 8,
-    paddingHorizontal: 6,
-    justifyContent: 'space-around',
-    alignItems: 'center'
-  },
-  navItem: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  navIconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 2
-  },
-  navIconBoxActive: {
-    backgroundColor: colors.primary
-  },
-  navLabel: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: colors.textMuted
-  },
-  navLabelActive: {
-    color: colors.primary,
-    fontWeight: '700'
-  }
+  container: { flex: 1, backgroundColor: colors.bgMuted, paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 },
+  screenContainer: { flex: 1 },
+  navWrap: { paddingHorizontal: 12, paddingTop: 7, paddingBottom: Platform.OS === 'web' ? 9 : 5, backgroundColor: 'rgba(243,248,246,0.96)' },
+  navBar: { minHeight: 58, borderRadius: borderRadius.lg, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: colors.border, flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', paddingHorizontal: 3, shadowColor: '#17453D', shadowOpacity: 0.08, shadowRadius: 16, shadowOffset: { width: 0, height: 5 }, elevation: 5 },
+  navItem: { flex: 1, alignItems: 'center', justifyContent: 'center', minWidth: 0, paddingVertical: 4 },
+  navIconBox: { width: 31, height: 29, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  navIconBoxActive: { backgroundColor: colors.primary },
+  navLabel: { fontSize: 9, fontWeight: '600', color: colors.textMuted, marginTop: 1 },
+  navLabelActive: { color: colors.primaryDark, fontWeight: '800' },
 });

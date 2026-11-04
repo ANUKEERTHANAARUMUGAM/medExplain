@@ -1,6 +1,4 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { SAMPLE_PRESCRIPTIONS, SAMPLE_REPORTS } from '../data/mockData';
-
 const KEYS = {
   SETTINGS: '@medex_settings',
   PROFILE: '@medex_user_profile',
@@ -13,14 +11,14 @@ const KEYS = {
 };
 
 const DEFAULT_PROFILE = {
-  name: 'Arun Kumar',
-  email: 'arun.kumar@gmail.com',
-  phone: '+91 98401 23456',
-  bloodGroup: 'O+',
-  age: '38',
-  gender: 'Male',
-  emergencyContactName: 'Kavitha (Spouse)',
-  emergencyContactPhone: '+91 98401 65432'
+  name: '',
+  email: '',
+  phone: '',
+  bloodGroup: '',
+  age: '',
+  gender: '',
+  emergencyContactName: '',
+  emergencyContactPhone: ''
 };
 
 const DEFAULT_PREFERENCES = {
@@ -30,6 +28,8 @@ const DEFAULT_PREFERENCES = {
   soundVibration: true,
   darkMode: false,
   biometricLock: false,
+  allowCloudAI: true,
+  includeProfileInVisitSummary: false,
   breakfastTime: '08:30',
   lunchTime: '13:00',
   dinnerTime: '20:30',
@@ -131,11 +131,9 @@ export const storageService = {
   async getPrescriptions() {
     try {
       const data = await AsyncStorage.getItem(KEYS.PRESCRIPTIONS);
-      if (data) return JSON.parse(data);
-      await AsyncStorage.setItem(KEYS.PRESCRIPTIONS, JSON.stringify(SAMPLE_PRESCRIPTIONS));
-      return SAMPLE_PRESCRIPTIONS;
+      return data ? JSON.parse(data).filter(item => !String(item.id).startsWith('rx-sample-')) : [];
     } catch {
-      return SAMPLE_PRESCRIPTIONS;
+      return [];
     }
   },
 
@@ -189,11 +187,9 @@ export const storageService = {
   async getReports() {
     try {
       const data = await AsyncStorage.getItem(KEYS.REPORTS);
-      if (data) return JSON.parse(data);
-      await AsyncStorage.setItem(KEYS.REPORTS, JSON.stringify(SAMPLE_REPORTS));
-      return SAMPLE_REPORTS;
+      return data ? JSON.parse(data).filter(item => !String(item.id).includes('sample')) : [];
     } catch {
-      return SAMPLE_REPORTS;
+      return [];
     }
   },
 
@@ -209,10 +205,16 @@ export const storageService = {
     }
   },
 
-  async clearReportsAndHistory() {
+  async clearAllHealthData() {
     try {
-      await AsyncStorage.removeItem(KEYS.REPORTS);
-      await AsyncStorage.removeItem(KEYS.DOSE_HISTORY);
+      await AsyncStorage.multiRemove([
+        KEYS.PROFILE,
+        KEYS.SETTINGS,
+        KEYS.REPORTS,
+        KEYS.PRESCRIPTIONS,
+        KEYS.DOSE_HISTORY,
+        KEYS.CHECKUPS
+      ]);
       return true;
     } catch (e) {
       console.error('Error clearing data', e);
@@ -223,22 +225,25 @@ export const storageService = {
   async getCheckups() {
     try {
       const data = await AsyncStorage.getItem(KEYS.CHECKUPS);
-      if (data) return JSON.parse(data);
-      const defaultCheckup = [
-        {
-          id: 'chk-1',
-          doctorName: 'Dr. K. Rajesh, M.D.',
-          clinicName: 'City Health Clinic, Chennai',
-          date: '2026-11-02',
-          time: '10:30 AM',
-          notes: 'Review after 5 days with fever chart'
-        }
-      ];
-      await AsyncStorage.setItem(KEYS.CHECKUPS, JSON.stringify(defaultCheckup));
-      return defaultCheckup;
+      if (data) return JSON.parse(data).filter(item => item.id !== 'chk-1');
+      return [];
     } catch {
       return [];
     }
+  },
+
+  async exportHealthData() {
+    const [profile, reports, prescriptions, doseHistory, checkups] = await Promise.all([
+      this.getUserProfile(), this.getReports(), this.getPrescriptions(), this.getDoseHistory(), this.getCheckups()
+    ]);
+    return {
+      exportedAt: new Date().toISOString(),
+      profile,
+      reports,
+      prescriptions,
+      doseHistory,
+      appointments: checkups
+    };
   },
 
   async saveCheckup(checkup) {

@@ -1,5 +1,5 @@
 import { storageService } from './storageService';
-import { SAMPLE_REPORTS, SAMPLE_PRESCRIPTIONS } from '../data/mockData';
+import { Platform } from 'react-native';
 
 const REPORT_SYSTEM_PROMPT = `
 You are MedExplain, an expert AI medical lab report interpreter.
@@ -88,19 +88,89 @@ Return ONLY valid JSON.
 `;
 
 export const aiService = {
+  async explainReportFile(file, preferredLanguage = 'both') {
+    const preferences = await storageService.getUserPreferences();
+    if (!preferences.allowCloudAI) {
+      throw new Error('Cloud AI processing is turned off. You can still view the built-in sample reports.');
+    }
+    const settings = await storageService.getSettings();
+    const backendUrl = Platform.OS === 'web'
+      ? (settings.backendUrl && settings.backendUrl !== 'http://10.0.2.2:3000' ? settings.backendUrl : 'http://localhost:3000')
+      : (settings.backendUrl || 'http://10.0.2.2:3000');
+    const formData = new FormData();
+    if (Platform.OS === 'web' && file.file) {
+      formData.append('report', file.file, file.name || 'lab-report.pdf');
+    } else {
+      formData.append('report', {
+        uri: file.uri,
+        name: file.name || 'lab-report.pdf',
+        type: file.mimeType || 'application/pdf'
+      });
+    }
+    formData.append('language', preferredLanguage);
+    const response = await fetch(`${backendUrl}/api/v1/reports/explain`, { method: 'POST', body: formData });
+    const result = await response.json();
+    if (!response.ok || !result.success || !result.data) {
+      throw new Error(result.error?.message || 'Report analysis failed. Check the MedEx API and AI provider settings.');
+    }
+    const data = result.data;
+    const biling = value => value || {};
+    const urgency = ({ routine: 'LOW', prompt_medical_review: 'MODERATE', urgent: 'CRITICAL', undetermined: 'MODERATE' })[data.urgency?.level] || 'MODERATE';
+    return {
+      id: `rep-${Date.now()}`,
+      date: new Date().toISOString().slice(0, 10),
+      title: file.name || 'Medical Lab Report',
+      aiTransparency: {
+        kind: 'ai',
+        source: 'Uploaded PDF',
+        provider: result.provider || 'Configured MedEx provider',
+        model: result.model || null,
+        remoteProcessing: true,
+        createdAt: new Date().toISOString()
+      },
+      urgency,
+      urgency_reason: data.urgency?.reason?.en || '',
+      summary_en: biling(data.report_summary).en || '',
+      summary_ta: biling(data.report_summary).ta || '',
+      metrics: (data.test_results || []).map(item => ({
+        name: item.test_name,
+        value: item.value,
+        unit: item.unit,
+        range: item.reference_range,
+        status: ({ normal: 'NORMAL', low: 'LOW', high: 'HIGH', critical: 'CRITICAL', not_provided: 'NOT PROVIDED', uncertain: 'UNCERTAIN' })[item.status] || 'UNCERTAIN',
+        explanation_en: item.explanation?.en || '',
+        explanation_ta: item.explanation?.ta || ''
+      })),
+      abnormal_findings: (data.abnormal_findings || []).map(item => ({ finding_en: item.explanation?.en || item.finding, finding_ta: item.explanation?.ta || '' })),
+      terms: (data.medical_terms || []).map(item => ({ term: item.term, definition_en: item.meaning?.en || '', definition_ta: item.meaning?.ta || '' })),
+      significance_en: (data.possible_significance || []).map(item => item.en).filter(Boolean).join(' '),
+      significance_ta: (data.possible_significance || []).map(item => item.ta).filter(Boolean).join(' '),
+      recommendations_en: (data.recommended_follow_up || []).map(item => item.en),
+      recommendations_ta: (data.recommended_follow_up || []).map(item => item.ta),
+      doctor_questions_en: (data.doctor_questions || []).map(item => item.en),
+      doctor_questions_ta: (data.doctor_questions || []).map(item => item.ta),
+      limitations_en: data.limitations?.en || '',
+      limitations_ta: data.limitations?.ta || ''
+    };
+  },
   /**
    * Explain a Medical Lab Report
    */
   async explainReport(reportText, preferredLanguage = 'both') {
+    const preferences = await storageService.getUserPreferences();
+    if (!preferences.allowCloudAI) {
+      throw new Error('Cloud AI processing is turned off. You can still view the built-in sample reports.');
+    }
     const settings = await storageService.getSettings();
     const apiKey = settings.groqApiKey;
 
     if (!apiKey) {
-      console.warn('No Groq API key set, using embedded intelligent analyzer');
-      return SAMPLE_REPORTS[0];
+      throw new Error('Add a Groq API key in Settings to analyze pasted report text, or choose a built-in sample.');
     }
 
+    let dataSentToAI = false;
     try {
+      dataSentToAI = true;
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -134,16 +204,19 @@ export const aiService = {
       const parsed = JSON.parse(content);
       parsed.id = 'rep-' + Date.now();
       parsed.date = new Date().toISOString().split('T')[0];
+      parsed.aiTransparency = {
+        kind: 'ai',
+        source: 'Pasted report text',
+        provider: 'Groq',
+        model: settings.groqModel || 'openai/gpt-oss-20b',
+        remoteProcessing: true,
+        createdAt: new Date().toISOString()
+      };
       return parsed;
     } catch (error) {
-      console.warn('AI analysis fallback triggered:', error.message);
-      // Return enhanced sample matching query or default
-      const matched = SAMPLE_REPORTS.find(r => reportText.toLowerCase().includes(r.id.split('-')[0])) || SAMPLE_REPORTS[0];
-      return {
-        ...matched,
-        id: 'rep-' + Date.now(),
-        date: new Date().toISOString().split('T')[0]
-      };
+      console.warn('AI analysis failed:', error.message);
+      if (!dataSentToAI) throw error;
+      throw new Error(`No AI explanation was generated. ${error.message}`);
     }
   },
 
@@ -151,11 +224,15 @@ export const aiService = {
    * Parse a Prescription Document into Structured Doses
    */
   async parsePrescription(prescriptionText) {
+    const preferences = await storageService.getUserPreferences();
+    if (!preferences.allowCloudAI) {
+      throw new Error('Cloud AI processing is turned off. Enable it in Privacy & AI settings to parse a prescription.');
+    }
     const settings = await storageService.getSettings();
     const apiKey = settings.groqApiKey;
 
     if (!apiKey || !prescriptionText || prescriptionText.trim().length === 0) {
-      return SAMPLE_PRESCRIPTIONS[0];
+      throw new Error('Prescription text is empty or no Groq API key is configured.');
     }
 
     try {
@@ -196,11 +273,8 @@ export const aiService = {
         }))
       };
     } catch (error) {
-      console.warn('Prescription parsing fallback triggered:', error.message);
-      return {
-        ...SAMPLE_PRESCRIPTIONS[0],
-        id: 'rx-' + Date.now()
-      };
+      console.warn('Prescription parsing failed:', error.message);
+      throw new Error(`No prescription was parsed. ${error.message}`);
     }
   }
 };

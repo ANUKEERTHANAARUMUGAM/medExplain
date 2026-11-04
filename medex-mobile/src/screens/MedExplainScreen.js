@@ -18,12 +18,12 @@ import { storageService } from '../services/storageService';
 import { SAMPLE_REPORTS } from '../data/mockData';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import * as ImagePicker from 'expo-image-picker';
 
 export const MedExplainScreen = () => {
   const [selectedLanguage, setSelectedLanguage] = useState('both'); // 'en', 'ta', 'both'
   const [loading, setLoading] = useState(false);
   const [currentReport, setCurrentReport] = useState(SAMPLE_REPORTS[0]);
+  const [selectedFiles, setSelectedFiles] = useState([]);
   const [customTextInput, setCustomTextInput] = useState('');
   const [showTextInput, setShowTextInput] = useState(false);
 
@@ -39,55 +39,47 @@ export const MedExplainScreen = () => {
   const handlePickDocument = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/pdf', 'image/*'],
-        copyToCacheDirectory: true
+        type: 'application/pdf',
+        copyToCacheDirectory: true,
+        multiple: true
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        const file = result.assets[0];
-        analyzeUploadedFile(file.name);
+        setSelectedFiles(previous => {
+          const existingUris = new Set(previous.map(file => file.uri));
+          return [...previous, ...result.assets.filter(file => !existingUris.has(file.uri))];
+        });
       }
     } catch (e) {
       Alert.alert('File Picker', 'Unable to pick document: ' + e.message);
     }
   };
 
-  const handleCameraScan = async () => {
-    try {
-      const permission = await ImagePicker.requestCameraPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Permission Denied', 'Camera permission is required to scan lab reports.');
-        return;
-      }
-
-      const result = await ImagePicker.launchCameraAsync({
-        quality: 0.8,
-        allowsEditing: true
-      });
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        analyzeUploadedFile('Camera_Lab_Report.jpg');
-      }
-    } catch (e) {
-      Alert.alert('Camera Error', 'Could not open camera: ' + e.message);
-    }
-  };
-
-  const analyzeUploadedFile = async (fileName) => {
+  const handleAnalyzeFiles = async () => {
+    if (!selectedFiles.length) return;
     setLoading(true);
-    try {
-      // Simulate/perform extraction from file
-      const reportText = `Lab Report: ${fileName}. Hemoglobin: 11.0 g/dL (Normal 13.5-17.5), White Blood Cells: 11,800 /mcL (Normal 4,500-11,000), Platelets: 220,000 /mcL, Glucose: 115 mg/dL.`;
-      const analysis = await aiService.explainReport(reportText, selectedLanguage);
-      setCurrentReport(analysis);
-      await storageService.saveReport(analysis);
-      Alert.alert('Analysis Complete', `Successfully analyzed "${fileName}" with AI.`);
-    } catch (e) {
-      Alert.alert('Analysis Error', e.message);
-    } finally {
-      setLoading(false);
+    const completed = [];
+    const failed = [];
+    for (const file of selectedFiles) {
+      try {
+        const analysis = await aiService.explainReportFile(file, selectedLanguage);
+        await storageService.saveReport(analysis);
+        completed.push(analysis);
+      } catch (error) {
+        failed.push({ file, error: error.message });
+      }
+    }
+    if (completed.length) setCurrentReport(completed[completed.length - 1]);
+    setSelectedFiles(failed.map(item => item.file));
+    setLoading(false);
+    if (failed.length) {
+      Alert.alert('Some reports could not be analyzed', `${completed.length} completed; ${failed.length} still selected. ${failed[0].file.name}: ${failed[0].error}`);
+    } else {
+      Alert.alert('Analysis complete', `Analyzed and saved ${completed.length} PDF report${completed.length === 1 ? '' : 's'}.`);
     }
   };
+
+  const removeSelectedFile = (uri) => setSelectedFiles(files => files.filter(file => file.uri !== uri));
 
   const handleAnalyzeCustomText = async () => {
     if (!customTextInput.trim()) {
@@ -112,6 +104,12 @@ export const MedExplainScreen = () => {
   const handleSelectSample = (sample) => {
     setCurrentReport(sample);
   };
+
+  const reportTransparency = currentReport?.aiTransparency || (
+    currentReport?.id?.includes('sample')
+      ? { kind: 'sample', source: 'Built-in sample report', provider: 'MedEx sample library', remoteProcessing: false }
+      : { kind: 'unknown', source: 'Saved before transparency details were available', provider: 'Unavailable', remoteProcessing: null }
+  );
 
   return (
     <View style={styles.container}>
@@ -147,17 +145,12 @@ export const MedExplainScreen = () => {
         {/* Upload Action Hub */}
         <View style={styles.uploadCard}>
           <Text style={styles.sectionHeading}>Analyze Lab Report</Text>
-          <Text style={styles.sectionSub}>Upload PDF or scan blood test reports for AI explanation</Text>
+          <Text style={styles.sectionSub}>Select one or more PDF reports for clear, bilingual AI explanations</Text>
 
           <View style={styles.actionButtonsRow}>
             <TouchableOpacity style={styles.uploadBtn} onPress={handlePickDocument} activeOpacity={0.8}>
               <Ionicons name="cloud-upload" size={20} color={colors.primary} />
-              <Text style={styles.uploadBtnText}>Upload PDF</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.uploadBtn} onPress={handleCameraScan} activeOpacity={0.8}>
-              <Ionicons name="camera" size={20} color={colors.secondary} />
-              <Text style={[styles.uploadBtnText, { color: colors.secondary }]}>Scan Camera</Text>
+              <Text style={styles.uploadBtnText}>Choose PDFs</Text>
             </TouchableOpacity>
 
             <TouchableOpacity 
@@ -169,6 +162,24 @@ export const MedExplainScreen = () => {
               <Text style={[styles.uploadBtnText, { color: colors.primaryDark }]}>Paste Text</Text>
             </TouchableOpacity>
           </View>
+
+          {selectedFiles.length > 0 && (
+            <View style={styles.fileListContainer}>
+              <Text style={styles.fileListLabel}>Selected reports ({selectedFiles.length})</Text>
+              {selectedFiles.map(file => (
+                <View key={file.uri} style={styles.fileListItem}>
+                  <Ionicons name="document-text-outline" size={16} color={colors.primary} />
+                  <Text numberOfLines={1} style={styles.fileName}>{file.name || 'PDF report'}</Text>
+                  <TouchableOpacity onPress={() => removeSelectedFile(file.uri)} accessibilityLabel={`Remove ${file.name || 'selected PDF'}`}>
+                    <Ionicons name="close-circle-outline" size={19} color={colors.textMuted} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+              <TouchableOpacity style={styles.analyzeBtn} onPress={handleAnalyzeFiles} disabled={loading} activeOpacity={0.8}>
+                <Text style={styles.analyzeBtnText}>{loading ? 'Analyzing reports…' : `Analyze ${selectedFiles.length} PDF${selectedFiles.length === 1 ? '' : 's'}`}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* Paste text modal/input */}
           {showTextInput && (
@@ -249,6 +260,18 @@ export const MedExplainScreen = () => {
                   <Text style={styles.urgencyReasonText}>{currentReport.urgency_reason}</Text>
                 </View>
               ) : null}
+            </View>
+
+            <View style={styles.transparencyCard}>
+              <View style={styles.sectionTitleRow}>
+                <Ionicons name={reportTransparency.kind === 'ai' ? 'sparkles' : 'eye-outline'} size={17} color={colors.primary} />
+                <Text style={styles.cardHeading}>About this explanation</Text>
+              </View>
+              <Text style={styles.transparencyLine}><Text style={styles.transparencyLabel}>Type: </Text>{reportTransparency.kind === 'ai' ? 'AI-generated explanation' : reportTransparency.kind === 'sample' ? 'Demonstration sample' : 'Saved result; details unavailable'}</Text>
+              <Text style={styles.transparencyLine}><Text style={styles.transparencyLabel}>Source: </Text>{reportTransparency.source}</Text>
+              <Text style={styles.transparencyLine}><Text style={styles.transparencyLabel}>Service: </Text>{reportTransparency.provider}{reportTransparency.model ? ` · ${reportTransparency.model}` : ''}</Text>
+              <Text style={styles.transparencyLine}><Text style={styles.transparencyLabel}>Sent for remote processing: </Text>{reportTransparency.remoteProcessing === true ? 'Yes' : reportTransparency.remoteProcessing === false ? 'No' : 'Unknown'}</Text>
+              <Text style={styles.transparencyFootnote}>AI explanations can be incomplete or wrong. Use the original report and discuss the results with a qualified clinician.</Text>
             </View>
 
             {/* Bilingual Key Summary */}
@@ -382,7 +405,7 @@ export const MedExplainScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.bgMuted
+    backgroundColor: 'transparent'
   },
   langSelector: {
     flexDirection: 'row',
@@ -436,6 +459,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between'
   },
+  fileListContainer: { marginTop: spacing.md, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border },
+  fileListLabel: { color: colors.textSecondary, fontSize: 12, fontWeight: '700', marginBottom: spacing.xs },
+  fileListItem: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: colors.border },
+  fileName: { color: colors.textPrimary, fontSize: 12, flex: 1 },
   uploadBtn: {
     flex: 1,
     alignItems: 'center',
@@ -543,6 +570,17 @@ const styles = StyleSheet.create({
   reportArea: {
     marginTop: 4
   },
+  transparencyCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border
+  },
+  transparencyLine: { fontSize: 12, lineHeight: 18, color: colors.textSecondary },
+  transparencyLabel: { fontWeight: '700', color: colors.textPrimary },
+  transparencyFootnote: { marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border, color: colors.textMuted, fontSize: 11, lineHeight: 16 },
   reportHeaderCard: {
     backgroundColor: colors.bgCard,
     borderRadius: borderRadius.md,

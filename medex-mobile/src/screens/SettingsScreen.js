@@ -9,6 +9,8 @@ import {
   Switch,
   Alert,
   Linking,
+  Share,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, borderRadius } from '../theme/colors';
@@ -87,6 +89,8 @@ export const SettingsScreen = () => {
 
   // Privacy
   const [biometricLock, setBiometricLock] = useState(false);
+  const [allowCloudAI, setAllowCloudAI] = useState(true);
+  const [includeProfileInVisitSummary, setIncludeProfileInVisitSummary] = useState(false);
 
   // Meal timings
   const [breakfast, setBreakfast] = useState('08:30');
@@ -113,7 +117,9 @@ export const SettingsScreen = () => {
     setSoundVibration(prefs.soundVibration ?? true);
     setLanguage(prefs.language || 'both');
     setDarkMode(prefs.darkMode ?? false);
-    setBiometricLock(prefs.biometricLock ?? false);
+    setBiometricLock(false);
+    setAllowCloudAI(prefs.allowCloudAI ?? true);
+    setIncludeProfileInVisitSummary(prefs.includeProfileInVisitSummary ?? false);
     setBreakfast(prefs.breakfastTime || '08:30');
     setLunch(prefs.lunchTime || '13:00');
     setDinner(prefs.dinnerTime || '20:30');
@@ -143,6 +149,8 @@ export const SettingsScreen = () => {
       language,
       darkMode,
       biometricLock,
+      allowCloudAI,
+      includeProfileInVisitSummary,
       breakfastTime: breakfast.trim(),
       lunchTime: lunch.trim(),
       dinnerTime: dinner.trim(),
@@ -156,20 +164,43 @@ export const SettingsScreen = () => {
   // ────────────────────────────────
   const handleClearData = () => {
     Alert.alert(
-      'Clear Health Data',
-      'This will permanently delete all saved reports and dose history. Your profile and preferences will be kept. Continue?',
+      'Delete Local Health Data',
+      'This removes your profile, reports, prescriptions, visits, dose history, and saved AI connection keys from this device. Display and reminder preferences are kept. It does not delete information already sent to an AI provider. This cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Clear Data',
           style: 'destructive',
           onPress: async () => {
-            await storageService.clearReportsAndHistory();
-            Alert.alert('Done', 'Health data cleared successfully.');
+            const cleared = await storageService.clearAllHealthData();
+            Alert.alert(cleared ? 'Done' : 'Could not clear data', cleared ? 'Your local health records, profile, and saved AI connection keys were deleted.' : 'Please try again.');
           },
         },
       ]
     );
+  };
+
+  const handleExportData = async () => {
+    try {
+      const data = await storageService.exportHealthData();
+      const message = JSON.stringify(data, null, 2);
+      if (Platform.OS === 'web' && globalThis.document && globalThis.URL?.createObjectURL) {
+        const fileUrl = globalThis.URL.createObjectURL(new Blob([message], { type: 'application/json' }));
+        const link = globalThis.document.createElement('a');
+        link.href = fileUrl;
+        link.download = 'medex-health-data.json';
+        link.click();
+        globalThis.URL.revokeObjectURL(fileUrl);
+        Alert.alert('Export ready', 'Your MedEx health data was downloaded as a JSON file.');
+        return;
+      }
+      await Share.share({
+        title: 'MedEx health data export',
+        message: Platform.OS === 'ios' ? message : `MedEx health data export\n\n${message}`
+      });
+    } catch (error) {
+      Alert.alert('Export unavailable', error.message || 'Could not open the share sheet.');
+    }
   };
 
   // ────────────────────────────────
@@ -360,14 +391,43 @@ export const SettingsScreen = () => {
         <SectionCard icon="shield-checkmark-outline" iconColor={colors.primaryDark} title="Privacy & Security">
           <SettingRow
             icon="finger-print-outline"
-            label="Biometric Lock"
-            value={biometricLock}
-            onValueChange={setBiometricLock}
+            label="Biometric Lock (not active yet)"
+            value={false}
+            disabled
           />
+          <Text style={styles.privacyDetail}>This build does not yet lock the app with biometrics.</Text>
 
           <TouchableOpacity style={styles.dangerRow} onPress={handleClearData} activeOpacity={0.7}>
             <Ionicons name="trash-outline" size={16} color={colors.danger} />
-            <Text style={styles.dangerText}>Clear Health Data (Reports & Dose History)</Text>
+            <Text style={styles.dangerText}>Delete local health data, profile & AI keys</Text>
+          </TouchableOpacity>
+        </SectionCard>
+
+        {/* ── Privacy & AI Transparency ── */}
+        <SectionCard icon="eye-outline" iconColor={colors.secondary} title="Privacy & AI Transparency">
+          <Text style={styles.cardSub}>Choose whether health information can be sent to the services that analyze it. Your choice is saved with your preferences.</Text>
+          <SettingRow
+            icon="cloud-upload-outline"
+            label="Allow cloud AI processing"
+            value={allowCloudAI}
+            onValueChange={setAllowCloudAI}
+          />
+          <Text style={styles.privacyDetail}>When enabled, report PDFs and prescription images are sent to your configured MedEx backend for processing; pasted report text is sent to Groq. Turn this off to block new cloud analysis requests. Built-in sample reports remain available.</Text>
+          <SettingRow
+            icon="person-outline"
+            label="Include profile details in visit summaries"
+            value={includeProfileInVisitSummary}
+            onValueChange={setIncludeProfileInVisitSummary}
+          />
+          <Text style={styles.privacyDetail}>Off by default. If enabled, new summaries include only your name, age, gender, and blood group. Summaries are prepared on your device and shown before sharing; summaries already saved are not changed by this setting.</Text>
+          <View style={styles.dataNotice}>
+            <Ionicons name="phone-portrait-outline" size={16} color={colors.primary} />
+            <Text style={styles.dataNoticeText}>Saved reports, prescriptions, appointments, and profile details stay in this app’s storage on this device; MedEx does not currently sync them to an account. Content you submit for analysis is sent to the service named above. Review its privacy terms before sending sensitive information.</Text>
+          </View>
+          <TouchableOpacity style={styles.exportRow} onPress={handleExportData} activeOpacity={0.72}>
+            <Ionicons name="download-outline" size={17} color={colors.primary} />
+            <Text style={styles.exportText}>Export my health data</Text>
+            <Ionicons name="share-outline" size={15} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
           </TouchableOpacity>
         </SectionCard>
 
@@ -421,7 +481,7 @@ export const SettingsScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.bgMuted,
+    backgroundColor: 'transparent',
   },
   content: { flex: 1 },
   contentContainer: {
@@ -551,6 +611,11 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontWeight: '600',
   },
+  privacyDetail: { fontSize: 11, lineHeight: 16, color: colors.textSecondary, marginBottom: spacing.sm, marginTop: 2 },
+  dataNotice: { flexDirection: 'row', alignItems: 'flex-start', padding: spacing.sm, marginTop: spacing.xs, borderRadius: borderRadius.sm, backgroundColor: colors.bgHighlight, gap: 7 },
+  dataNoticeText: { flex: 1, fontSize: 11, lineHeight: 16, color: colors.textSecondary },
+  exportRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, borderTopWidth: 1, borderTopColor: colors.border, marginTop: spacing.sm, gap: 8 },
+  exportText: { fontSize: 13, color: colors.primaryDark, fontWeight: '700' },
 
   // About rows
   aboutRow: {

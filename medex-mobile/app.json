@@ -7,7 +7,7 @@
     "userInterfaceStyle": "light",
     "splash": {
       "resizeMode": "contain",
-      "backgroundColor": "#0F172A"
+      "backgroundColor": "#F3F8F6"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -19,7 +19,7 @@
     "android": {
       "package": "com.durvish.medexplain",
       "adaptiveIcon": {
-        "backgroundColor": "#0F172A"
+        "backgroundColor": "#0E3938"
       },
       "permissions": [
         "android.permission.CAMERA",

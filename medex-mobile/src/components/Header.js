@@ -26,15 +26,14 @@ export const Header = ({ title, subtitle, rightAction, icon = 'medical' }) => {
 
 const styles = StyleSheet.create({
   container: {
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.lg,
+    paddingTop: spacing.md,
     paddingBottom: spacing.md,
-    backgroundColor: colors.bgDark,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.bgMuted,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderBottomWidth: 1,
-    borderBottomColor: '#1E293B'
+    borderBottomWidth: 0
   },
   leftRow: {
     flexDirection: 'row',
@@ -44,7 +43,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: borderRadius.md,
-    backgroundColor: '#0F2F38',
+    backgroundColor: colors.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: spacing.sm
@@ -52,12 +51,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: '700',
-    color: colors.textWhite,
+    color: colors.textPrimary,
     letterSpacing: 0.3
   },
   subtitle: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     marginTop: 2
   },
   rightContainer: {

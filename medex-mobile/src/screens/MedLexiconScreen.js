@@ -276,7 +276,7 @@ export const MedLexiconScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.bgMuted
+    backgroundColor: 'transparent'
   },
   searchContainer: {
     backgroundColor: colors.bgDark,

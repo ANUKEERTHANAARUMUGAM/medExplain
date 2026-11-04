@@ -8,16 +8,56 @@ import {
   ActivityIndicator, 
   Alert,
   Modal,
-  TextInput
+  TextInput,
+  Platform,
+  Share
 } from 'react-native';
 import { colors, spacing, borderRadius } from '../theme/colors';
 import { Header } from '../components/Header';
 import { MedicineCard } from '../components/MedicineCard';
 import { storageService } from '../services/storageService';
-import { aiService } from '../services/aiService';
-import { SAMPLE_PRESCRIPTIONS } from '../data/mockData';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+
+const makeVisitSummary = (data, discussion) => {
+  const { visit, profile, reports, prescriptions, includeProfile } = data;
+  const medicines = prescriptions.flatMap(prescription => (prescription.medicines || []).map(medicine => ({
+    ...medicine,
+    extractionUnreviewed: medicine.aiTransparency?.reviewedByUser === false || prescription.aiTransparency?.reviewedByUser === false
+  })));
+  const latestReports = [...reports].sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 3);
+  const lines = [
+    'MEDEX · DOCTOR VISIT SUMMARY',
+    'Patient-prepared information for discussion with a clinician.',
+    '',
+    `Appointment: ${visit.date || 'Date not set'} at ${visit.time || 'Time not set'}`,
+    `Doctor: ${visit.doctorName || 'Not provided'}`,
+    `Clinic: ${visit.clinicName || 'Not provided'}`,
+  ];
+  if (includeProfile) {
+    const details = [profile.name, profile.age ? `${profile.age} years` : '', profile.gender, profile.bloodGroup ? `Blood group ${profile.bloodGroup}` : ''].filter(Boolean);
+    if (details.length) lines.push('', `Patient details: ${details.join(' · ')}`);
+  }
+  if (visit.notes) lines.push('', `Appointment notes: ${visit.notes}`);
+  if (discussion.trim()) lines.push('', `What I want to discuss: ${discussion.trim()}`);
+  lines.push('', 'CURRENT MEDICINES');
+  if (!medicines.length) lines.push('No saved medicines.');
+  medicines.forEach(medicine => {
+    const schedule = [medicine.dosage, medicine.frequencyNotation, medicine.durationDays ? `${medicine.durationDays} days` : ''].filter(Boolean).join(' · ');
+    const extracted = medicine.extractionUnreviewed ? ' (extracted; please verify)' : '';
+    lines.push(`• ${medicine.name || 'Medicine'}${schedule ? ` — ${schedule}` : ''}${extracted}`);
+  });
+  lines.push('', 'RECENT REPORTS');
+  if (!latestReports.length) lines.push('No saved reports.');
+  latestReports.forEach(report => {
+    lines.push(`• ${report.date || 'Date unknown'} · ${report.title || 'Lab report'}${report.urgency ? ` · ${report.urgency}` : ''}`);
+    const notableMetrics = (report.metrics || []).filter(metric => metric.status && metric.status !== 'NORMAL').slice(0, 4);
+    if (notableMetrics.length) lines.push(`  Results to discuss: ${notableMetrics.map(metric => `${metric.name}: ${metric.value} ${metric.unit || ''} (${metric.status})`).join('; ')}`);
+    else if (report.abnormal_findings?.length) lines.push(`  Findings: ${report.abnormal_findings.slice(0, 2).map(item => item.finding_en || item.finding).filter(Boolean).join('; ')}`);
+  });
+  lines.push('', 'Please bring the original reports and prescription. Verify extracted medicine details with your clinician.', 'This summary is assembled on this device from saved records and your notes; no new AI request is made. It is not a diagnosis or treatment recommendation.');
+  return lines.join('\n');
+};
 
 export const MedRemindScreen = () => {
   const [loading, setLoading] = useState(false);
@@ -25,6 +65,12 @@ export const MedRemindScreen = () => {
   const [doseHistory, setDoseHistory] = useState({});
   const [mealTimings, setMealTimings] = useState({ breakfastTime: '08:30', lunchTime: '13:00', dinnerTime: '20:30' });
   const [checkups, setCheckups] = useState([]);
+  const [summaryVisit, setSummaryVisit] = useState(null);
+  const [summaryData, setSummaryData] = useState(null);
+  const [summaryDiscussion, setSummaryDiscussion] = useState('');
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summarySaving, setSummarySaving] = useState(false);
+  const [summaryModalVisible, setSummaryModalVisible] = useState(false);
   
   // Custom medicine modal
   const [modalVisible, setModalVisible] = useState(false);
@@ -74,7 +120,7 @@ export const MedRemindScreen = () => {
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        processPrescriptionText("Rx: Dr. Ramesh MD, Apollo Clinic. Amoxicillin 500mg 1-0-1 AF 5 days. Pantoprazole 40mg 1-0-0 BF 5 days. Review after 5 days.");
+        processPrescriptionFile(result.assets[0]);
       }
     } catch (e) {
       Alert.alert('Error', e.message);
@@ -89,17 +135,59 @@ export const MedRemindScreen = () => {
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        processPrescriptionText("Rx: Dr. Ramesh MD, Apollo Clinic. Cefixime 200mg 1-0-1 AF 5 days. Paracetamol 650mg 1-1-1 AF 3 days. Review after 5 days.");
+        processPrescriptionFile(result.assets[0]);
       }
     } catch (e) {
       Alert.alert('Error', e.message);
     }
   };
 
-  const processPrescriptionText = async (rawText) => {
+  const processPrescriptionFile = async (file) => {
     setLoading(true);
     try {
-      const parsed = await aiService.parsePrescription(rawText);
+      const privacyPreferences = await storageService.getUserPreferences();
+      if (!privacyPreferences.allowCloudAI) {
+        throw new Error('Cloud processing is turned off. Enable it in Settings → Privacy & AI to scan a prescription.');
+      }
+      const settings = await storageService.getSettings();
+      const serviceUrl = Platform.OS === 'web'
+        ? (settings.backendUrl && settings.backendUrl !== 'http://10.0.2.2:3000' ? settings.backendUrl : 'http://localhost:3000')
+        : (settings.backendUrl || 'http://10.0.2.2:3000');
+      const formData = new FormData();
+      if (Platform.OS === 'web' && file.file) {
+        formData.append('prescription', file.file, file.name || 'prescription-image');
+      } else {
+        formData.append('prescription', {
+          uri: file.uri,
+          name: file.name || 'prescription-image.jpg',
+          type: file.mimeType || file.type || 'image/jpeg'
+        });
+      }
+      const response = await fetch(`${serviceUrl}/api/prescriptions/parse`, {
+        method: 'POST',
+        body: formData
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success || !result.data) {
+        throw new Error(result.message || 'Prescription could not be read. Check that the MedRemind service is running.');
+      }
+      const parsed = {
+        ...result.data,
+        id: 'rx-' + Date.now(),
+        prescriptionDate: result.data.prescriptionDate || todayKey,
+        aiTransparency: {
+          kind: 'extraction',
+          source: 'Uploaded prescription image',
+          provider: result.data.pipeline || 'Configured MedEx prescription service',
+          remoteProcessing: true,
+          createdAt: new Date().toISOString(),
+          reviewedByUser: false
+        },
+        medicines: (result.data.medicines || []).map((medicine, index) => ({
+          id: medicine.id || `med-${Date.now()}-${index}`,
+          ...medicine
+        }))
+      };
       const updated = await storageService.savePrescription(parsed);
       setPrescriptions(updated);
 
@@ -108,7 +196,7 @@ export const MedRemindScreen = () => {
           id: 'chk-' + Date.now(),
           doctorName: parsed.doctorName || 'Doctor',
           clinicName: parsed.clinicOrHospital || 'Clinic',
-          date: parsed.doctorCheckup.suggestedDate || '2026-11-05',
+          date: parsed.doctorCheckup.suggestedDate || todayKey,
           time: '10:00 AM',
           notes: parsed.doctorCheckup.instructions || 'Review consultation'
         };
@@ -116,7 +204,7 @@ export const MedRemindScreen = () => {
         setCheckups(updatedCheckups);
       }
 
-      Alert.alert('Success', `Prescription processed! Added ${parsed.medicines?.length || 0} medicines and scheduled reminders.`);
+      Alert.alert('Prescription read', `Found ${parsed.medicines?.length || 0} medicines. Review the details and add reminders as needed.`);
     } catch (e) {
       Alert.alert('Processing Error', e.message);
     } finally {
@@ -196,6 +284,57 @@ export const MedRemindScreen = () => {
     Alert.alert('Checkup Scheduled', 'Doctor appointment added to your medical calendar.');
   };
 
+  const openVisitSummary = async (visit) => {
+    setSummaryVisit(visit);
+    setSummaryDiscussion(visit.visitDiscussion || '');
+    setSummaryData(null);
+    setSummaryModalVisible(true);
+    setSummaryLoading(true);
+    try {
+      const [profile, reports, savedPrescriptions, preferences] = await Promise.all([
+        storageService.getUserProfile(), storageService.getReports(), storageService.getPrescriptions(), storageService.getUserPreferences()
+      ]);
+      setSummaryData({ visit, profile, reports, prescriptions: savedPrescriptions, includeProfile: preferences.includeProfileInVisitSummary });
+    } catch {
+      Alert.alert('Could not prepare summary', 'Some saved health information could not be loaded.');
+      setSummaryModalVisible(false);
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
+
+  const saveVisitNotes = async () => {
+    if (!summaryVisit) return;
+    setSummarySaving(true);
+    try {
+      const preparedAt = new Date().toISOString();
+      const visitSummary = summaryData ? makeVisitSummary(summaryData, summaryDiscussion) : summaryVisit.visitSummary;
+      const updated = await storageService.saveCheckup({ ...summaryVisit, visitDiscussion: summaryDiscussion.trim(), visitSummary, summaryPreparedAt: preparedAt });
+      setCheckups(updated);
+      setSummaryVisit({ ...summaryVisit, visitDiscussion: summaryDiscussion.trim(), visitSummary, summaryPreparedAt: preparedAt });
+      Alert.alert('Saved', 'This visit summary and your notes were saved on this device.');
+    } catch (error) {
+      Alert.alert('Could not save', error.message || 'Please try again.');
+    } finally {
+      setSummarySaving(false);
+    }
+  };
+
+  const shareVisitSummary = async () => {
+    if (!summaryData) return;
+    try {
+      const message = makeVisitSummary(summaryData, summaryDiscussion);
+      if (Platform.OS === 'web' && !globalThis.navigator?.share && globalThis.navigator?.clipboard?.writeText) {
+        await globalThis.navigator.clipboard.writeText(message);
+        Alert.alert('Copied', 'The visit summary was copied. Paste it into a message or document to share.');
+        return;
+      }
+      await Share.share({ title: 'MedEx doctor visit summary', message });
+    } catch (error) {
+      Alert.alert('Could not share summary', error.message || 'Please try again.');
+    }
+  };
+
   // Compile all active medicines across prescriptions
   const allMedicines = prescriptions.flatMap(p => p.medicines || []);
   const todayDoses = doseHistory[todayKey] || {};
@@ -222,7 +361,7 @@ export const MedRemindScreen = () => {
         <View style={styles.scanBanner}>
           <View style={styles.scanTextArea}>
             <Text style={styles.scanTitle}>Scan Prescription (மருந்துச் சீட்டு)</Text>
-            <Text style={styles.scanSub}>Point camera at doctor prescription to auto-schedule doses</Text>
+            <Text style={styles.scanSub}>Prescription images are sent to MedEx for OCR and AI extraction. Confirm every medicine and dose with your doctor or pharmacist.</Text>
           </View>
           <View style={styles.scanBtnRow}>
             <TouchableOpacity style={styles.cameraBtn} onPress={handleScanPrescription} activeOpacity={0.8}>
@@ -313,9 +452,14 @@ export const MedRemindScreen = () => {
               {chk.notes ? <Text style={styles.checkupNotes}>{chk.notes}</Text> : null}
             </View>
             <View style={styles.checkupSyncBadge}>
-              <Ionicons name="checkmark-done" size={14} color={colors.success} />
-              <Text style={styles.checkupSyncText}>Synced</Text>
+              <Ionicons name="checkmark-circle-outline" size={14} color={colors.success} />
+              <Text style={styles.checkupSyncText}>{chk.summaryPreparedAt ? 'Summary saved' : 'Saved'}</Text>
             </View>
+            <TouchableOpacity style={styles.visitSummaryButton} onPress={() => openVisitSummary(chk)} activeOpacity={0.75}>
+              <Ionicons name="document-text-outline" size={15} color={colors.primary} />
+              <Text style={styles.visitSummaryButtonText}>{chk.summaryPreparedAt ? 'Update visit summary' : 'Prepare visit summary'}</Text>
+              <Ionicons name="chevron-forward" size={15} color={colors.primary} style={{ marginLeft: 'auto' }} />
+            </TouchableOpacity>
           </View>
         ))}
       </ScrollView>
@@ -462,6 +606,56 @@ export const MedRemindScreen = () => {
           </View>
         </View>
       </Modal>
+
+      <Modal visible={summaryModalVisible} transparent animationType="slide" onRequestClose={() => setSummaryModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.summaryModalContent}>
+            <View style={styles.modalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalTitle}>Doctor visit summary</Text>
+                <Text style={styles.summaryModalSubtitle}>{summaryVisit?.doctorName || 'Appointment'} · {summaryVisit?.date || ''}</Text>
+              </View>
+              <TouchableOpacity onPress={() => setSummaryModalVisible(false)} accessibilityLabel="Close visit summary">
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.summaryModalScroll} keyboardShouldPersistTaps="handled">
+              <View style={styles.summaryNotice}>
+                <Ionicons name="phone-portrait-outline" size={16} color={colors.primary} />
+                <Text style={styles.summaryNoticeText}>Prepared on this device from your saved records. No new AI request is made. Review everything before sharing.</Text>
+              </View>
+              <Text style={styles.inputLabel}>What would you like to discuss?</Text>
+              <TextInput
+                style={[styles.modalInput, styles.summaryNotesInput]}
+                placeholder="Symptoms, changes since the last visit, or questions for your doctor"
+                placeholderTextColor={colors.textMuted}
+                value={summaryDiscussion}
+                onChangeText={setSummaryDiscussion}
+                multiline
+                textAlignVertical="top"
+              />
+              {summaryLoading ? (
+                <View style={styles.summaryLoading}><ActivityIndicator color={colors.primary} /><Text style={styles.summaryLoadingText}>Preparing from your saved records…</Text></View>
+              ) : summaryData ? (
+                <View style={styles.summaryPreviewBox}>
+                  <Text style={styles.summaryPreviewTitle}>Preview</Text>
+                  <Text selectable style={styles.summaryPreviewText}>{makeVisitSummary(summaryData, summaryDiscussion)}</Text>
+                </View>
+              ) : null}
+            </ScrollView>
+            <View style={styles.summaryActions}>
+              <TouchableOpacity style={styles.summarySaveButton} onPress={saveVisitNotes} disabled={summarySaving || summaryLoading}>
+                <Ionicons name="save-outline" size={17} color={colors.primary} />
+                <Text style={styles.summarySaveText}>{summarySaving ? 'Saving…' : 'Save summary'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.summaryShareButton, (!summaryData || summaryLoading) && styles.buttonDisabled]} onPress={shareVisitSummary} disabled={!summaryData || summaryLoading}>
+                <Ionicons name="share-outline" size={17} color="#FFFFFF" />
+                <Text style={styles.summaryShareText}>Share summary</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -469,7 +663,7 @@ export const MedRemindScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.bgMuted
+    backgroundColor: 'transparent'
   },
   content: {
     flex: 1
@@ -633,6 +827,7 @@ const styles = StyleSheet.create({
   },
   checkupCard: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     backgroundColor: colors.bgCard,
     borderRadius: borderRadius.md,
@@ -694,6 +889,8 @@ const styles = StyleSheet.create({
     color: colors.success,
     marginLeft: 2
   },
+  visitSummaryButton: { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 7, paddingTop: 10, marginTop: 9, borderTopWidth: 1, borderTopColor: colors.border },
+  visitSummaryButtonText: { color: colors.primaryDark, fontSize: 12, fontWeight: '700' },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.6)',
@@ -706,6 +903,23 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     maxHeight: '85%'
   },
+  summaryModalContent: { backgroundColor: colors.bgCard, borderTopLeftRadius: borderRadius.xl, borderTopRightRadius: borderRadius.xl, padding: spacing.md, height: '90%', maxHeight: '94%' },
+  summaryModalSubtitle: { color: colors.textSecondary, fontSize: 11, marginTop: 3 },
+  summaryModalScroll: { flex: 1 },
+  summaryNotice: { flexDirection: 'row', gap: 7, padding: spacing.sm, borderRadius: borderRadius.sm, backgroundColor: colors.bgHighlight, marginBottom: spacing.sm },
+  summaryNoticeText: { flex: 1, fontSize: 11, lineHeight: 16, color: colors.textSecondary },
+  summaryNotesInput: { minHeight: 76, textAlignVertical: 'top' },
+  summaryLoading: { alignItems: 'center', padding: spacing.lg, gap: 8 },
+  summaryLoadingText: { fontSize: 12, color: colors.textSecondary },
+  summaryPreviewBox: { backgroundColor: '#FAFCFB', borderRadius: borderRadius.sm, padding: spacing.sm, borderWidth: 1, borderColor: colors.border, marginTop: spacing.sm },
+  summaryPreviewTitle: { color: colors.textPrimary, fontSize: 12, fontWeight: '800', marginBottom: spacing.xs },
+  summaryPreviewText: { color: colors.textSecondary, fontSize: 11, lineHeight: 17 },
+  summaryActions: { flexDirection: 'row', gap: 8, paddingTop: spacing.sm, marginTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border },
+  summarySaveButton: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: colors.border, borderRadius: borderRadius.md, paddingVertical: 12 },
+  summarySaveText: { color: colors.primaryDark, fontSize: 12, fontWeight: '700' },
+  summaryShareButton: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, backgroundColor: colors.primary, borderRadius: borderRadius.md, paddingVertical: 12 },
+  summaryShareText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+  buttonDisabled: { opacity: 0.5 },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',

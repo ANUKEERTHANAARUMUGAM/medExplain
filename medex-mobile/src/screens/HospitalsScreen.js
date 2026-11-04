@@ -153,7 +153,7 @@ export const HospitalsScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.bgMuted
+    backgroundColor: 'transparent'
   },
   content: {
     flex: 1
