@@ -1,12 +1,6 @@
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '../config/supabase';
 
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
-const SUPABASE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 const REQUEST_TIMEOUT_MS = 5000;
-
-const supabase = SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY
-  ? createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
-  : null;
 
 const withTimeout = (promise, ms) => {
   let timer;
